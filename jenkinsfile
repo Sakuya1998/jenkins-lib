@@ -1,0 +1,86 @@
+pipeline {
+    agent any
+    environment {
+        // 假设 SonarQube 服务器地址和访问令牌已经作为环境变量或 Jenkins 凭证配置
+        SONAR_HOST_URL = "http://192.168.1.200:9000"
+        SONAR_TOKEN = credentials('sonar-token-credential-id') // 替换为您的凭证 ID
+    }
+    stages {
+        stage("安装 SonarQube Scanner") {
+            steps {
+                script {
+                    // 安装 SonarQube Scanner 如果尚未安装
+                    sh '''
+                    if ! command -v sonar-scanner &> /dev/null; then
+                        echo "Installing SonarQube Scanner..."
+                        curl -sSfL https://get.sonarqube.com/sonar-scanner-cli/jenkins -o sonar-scanner.zip
+                        unzip sonar-scanner.zip -d /opt/
+                        rm sonar-scanner.zip
+                        chmod +x /opt/sonar-scanner-*/bin/sonar-scanner
+                        /opt/sonar-scanner-*/bin/sonar-scanner --help
+                    else
+                        echo "SonarQube Scanner is already installed."
+                    fi
+                    '''
+                }
+            }
+        }
+        stage("查找项目") {
+            steps {
+                script {
+                    // 从 Jenkins 作业名称中获取 SonarQube 项目名称
+                    def sonarProjectName = "${JOB_NAME.split('/')[-1]}"
+                    def result = ProjectSearch(sonarProjectName)
+                    if (result != true) {
+                        echo "创建 SonarQube 项目: ${sonarProjectName}..."
+                        def createResult = CreateProject(sonarProjectName)
+                        if (!createResult) {
+                            error "无法创建 SonarQube 项目"
+                        }
+                    } else {
+                        echo "项目 ${sonarProjectName} 已存在。"
+                    }
+                }
+            }
+        }
+        stage("更新质量配置文件") {
+            steps {
+                script {
+                    // 假设从项目名称中提取语言和配置文件名称的逻辑
+                    def lang = "java" // 根据项目实际语言设置
+                    def profileName = "${sonarProjectName.split('-')[0]}"
+                    def updateResult = UpdateQualityProfiles(lang, sonarProjectName, profileName)
+                    if (!updateResult) {
+                        error "无法更新质量配置文件"
+                    }
+                }
+            }
+        }
+        stage("执行代码质量检测") {
+            steps {
+                script {
+                    // 设置 SonarQube 项目环境变量
+                    withSonarQubeEnv('com.example.myproject', env.SONAR_TOKEN) {
+                        // 执行 SonarQube Scanner
+                        sh 'sonar-scanner'
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            // 无论构建成功与否，都执行清理操作
+            echo '流水线结束.'
+        }
+        success {
+            echo '构建成功！'
+        }
+        failure {
+            echo '构建失败！'
+        }
+    }
+}
+
+// 以下是函数定义
+// ...
